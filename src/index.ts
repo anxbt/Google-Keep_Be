@@ -1,6 +1,8 @@
 import express, { Request, Response ,NextFunction} from 'express';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { random } from './utils';
 
 const app = express();
 app.use(express.json());
@@ -69,10 +71,17 @@ const postSchema = new mongoose.Schema({
     tags: { type: [String], default: [] }
 })
 
-// Create a User model based on the schema
-const User = mongoose.model("User",userSchema);
+const LinkSchema = new mongoose.Schema({
+    hash:String,
+    userId:{type:mongoose.Types.ObjectId, ref:"User"},
+})
 
-const Post = mongoose.model("Post", postSchema);
+// Create a User model based on the schema
+const UserModel = mongoose.model("User",userSchema);
+
+const PostModel = mongoose.model("Post", postSchema);
+
+const LinkModel = mongoose.model("Link", LinkSchema);
 
  // @ts-ignore
 app.get("/",verifyToken, (req: Request, res: Response) => {
@@ -89,12 +98,12 @@ app.post("/signup", async (req:Request,res:Response): Promise<any>   => {
     }
 
  try{
-    const existingUser = await User.findOne({ username:req.body.username });
+    const existingUser = await UserModel.findOne({ username:req.body.username });
     if(existingUser){
         return res.status(400).json({message:"User already exists"});
     }
 
-    const newUser = new User({
+    const newUser = new UserModel({
         username: req.body.username,
         password: req.body.password
     })
@@ -109,7 +118,7 @@ app.post("/signup", async (req:Request,res:Response): Promise<any>   => {
 
 app.post("/signin", async (req: Request, res: Response): Promise<any>  => {
 try{
-    const user = await User.findOne({ username: req.body.username})
+    const user = await UserModel.findOne({ username: req.body.username})
     if(!user){
         return res.status(401).json({message: "Invalid username"});
     }
@@ -119,7 +128,7 @@ try{
         return res.status(401).json({message: "Invalid password"});
     }
 
-    const token =jwt.sign({username:user.username}, "secret");
+    const token =jwt.sign({username:user.username,  id: user._id.toString()}, "secret");
     res.status(200).json({message:"Login successful", token})
 
 }catch(error){
@@ -130,7 +139,7 @@ try{
 app.post("/post", verifyToken ,async (req: Request, res: Response): Promise<any>  => {
     const {type, link, title, content, tags} = req.body;
 
-    const post = new  Post({
+    const post = new  PostModel({
         type,
         link,
         title,
@@ -152,7 +161,7 @@ app.get("/post",verifyToken, async (req: Request, res: Response): Promise<any>  
     // @ts-ignore
     const userId = req.body.user?.id;
     //const userId = req.userId;
-    const content =await Post.find({
+    const content =await PostModel.find({
         userId: userId
     })
     res.status(200).json(content);
@@ -166,7 +175,7 @@ app.delete("/post",verifyToken, async (req: Request, res: Response): Promise<any
     if (!contentId) {
         return res.status(400).json({ message: "Content ID is required" });
     }
-        await Post.deleteMany({
+        await PostModel.deleteMany({
         userId: userId
     })
 
@@ -174,6 +183,86 @@ app.delete("/post",verifyToken, async (req: Request, res: Response): Promise<any
         message: "Deleted"
  
     })
+})
+
+
+app.post("/share", verifyToken ,async (req: Request, res: Response): Promise<any>  => {
+    const share=req.body.share;
+
+    if(share){
+        const existingLink=await LinkModel.findOne({
+            userId: (req as any).user?.id,
+        })
+
+        if(existingLink){
+        res.json({
+            hash: existingLink.hash,
+            message: "Link already exists"
+        })
+        return;
+        }
+
+        const hash =random(10);
+        await LinkModel.create({
+            userId: (req as any).user?.id,
+            hash: hash
+        })
+        res.json({
+            hash: hash,
+            message: "Link created successfully"
+        })
+    }else{
+        await LinkModel.deleteMany({
+            userId: (req as any).user?.id,
+        });
+
+        res.json({
+            message: "Link deleted successfully"
+        })
+    }
+
+})
+
+app.get("/:shareLink" ,async (req: Request, res: Response): Promise<any>  => {
+
+const hash = req.params.shareLink;
+
+const link =await LinkModel.findOne({
+    hash: hash,
+    
+})
+if (!link) {
+        res.status(411).json({
+            message: "Sorry incorrect input"
+        })
+        return;
+    }
+
+    //userId
+    const content =await PostModel.find({
+    userId: link.userId
+    })
+
+    console.log(link);
+
+     const user = await UserModel.findOne({
+        _id: link.userId
+    })
+
+    if (!user) {
+        res.status(411).json({
+            message: "user not found, error should ideally not happen"
+        })
+        return;
+    }
+
+    res.json({
+        username: user.username,
+        content: content
+    })
+    console.log("Content shared successfully", content);
+
+
 })
 
 
