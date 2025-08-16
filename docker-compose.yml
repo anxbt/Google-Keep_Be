@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"  # Adjust port if your app uses a different one
+    environment:
+      - NODE_ENV=developmentohh k
+      - DATABASE_URL=${DATABASE_URL}
+    volumes:
+      - .:/app
+      - /app/node_modules  # Prevent overwriting node_modules
+    depends_on:
+      - prisma-migrate
+    
+  # Service to run Prisma migrations on startup
+  prisma-migrate:
+    build: .
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    command: npx prisma migrate deploy
+    volumes:
+      - .:/app
+      - /app/node_modules
+   

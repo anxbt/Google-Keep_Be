@@ -1,13 +1,14 @@
-import express, { Request, Response ,NextFunction} from 'express';
-import mongoose from 'mongoose';
+import express, { Request, Response, NextFunction } from 'express';
+
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { random } from './utils';
-
+import { PrismaClient } from '@prisma/client'
 const app = express();
 app.use(express.json());
 
-const uri = "mongodb+srv://anubrat23:5432@cluster0.jj03c.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const prisma = new PrismaClient();
+
 
 // const testToken = jwt.sign({ test: "data" }, "secret");
 // console.log("Test token:", testToken);
@@ -28,18 +29,18 @@ const verifyToken = (req: Request, res: Response, next: NextFunction) => {
 
 
     // const token = req.headers.authorization?.split(" ")[1];
-    const token =req.headers['authorization'];
+    const token = req.headers['authorization'];
 
     if (!token) {
-         console.log("No token provided"); 
+        console.log("No token provided");
         res.status(401).json({ message: "Access denied, no token provided" });
         return;
     }
 
     jwt.verify(token, "secret", (err, decoded) => {
         if (err) {
-             console.log("No token provided"); 
-            
+            console.log("No token provided");
+
             return res.status(400).json({ message: "Invalid token", });
         }
         // Attach user info to request for downstream handlers
@@ -49,171 +50,184 @@ const verifyToken = (req: Request, res: Response, next: NextFunction) => {
     });
 };
 
-mongoose.connect(uri)
-.then(()=>{
-    console.log("Connected to MongoDB");    
-})
-.catch((err) => {
-    console.error("Error connecting to MongoDB:", err);
+// mongoose.connect(uri)
+// .then(()=>{
+//     console.log("Connected to MongoDB");    
+// })
+// .catch((err) => {
+//     console.error("Error connecting to MongoDB:", err);
+// });
+
+
+// const userSchema = new mongoose.Schema({
+//     username:String,
+//     password:String
+// })
+
+// const postSchema = new mongoose.Schema({
+//     title: { type: String, required: true },
+//     content: { type: String, required: true },
+//     type: { type: String, enum: ["document", "tweet", "youtube", "link"], required: true },
+//     link: { type: String},
+//     tags: { type: [String], default: [] }
+// })
+
+// const LinkSchema = new mongoose.Schema({
+//     hash:String,
+//     userId:{type:mongoose.Types.ObjectId, ref:"User"},
+// })
+
+// // Create a User model based on the schema
+// const UserModel = mongoose.model("User",userSchema);
+
+// const PostModel = mongoose.model("Post", postSchema);
+
+// const LinkModel = mongoose.model("Link", LinkSchema);
+
+// @ts-ignore
+app.get("/",  (req: Request, res: Response) => {
+    return res.status(200).json({ message: "Welcome to the API" });
 });
 
 
-const userSchema = new mongoose.Schema({
-    username:String,
-    password:String
-})
+app.post("/signup", async (req: Request, res: Response): Promise<any> => {
+    const username = req.body.username;
+    const password = req.body.password;
 
-const postSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    content: { type: String, required: true },
-    type: { type: String, enum: ["document", "tweet", "youtube", "link"], required: true },
-    link: { type: String},
-    tags: { type: [String], default: [] }
-})
+    if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+    }
 
-const LinkSchema = new mongoose.Schema({
-    hash:String,
-    userId:{type:mongoose.Types.ObjectId, ref:"User"},
-})
+    try {
+        const existingUser = await prisma.user.findUnique({ where: { username: req.body.username } });
+        if (existingUser) {
+            return res.status(400).json({ message: "User already exists" });
+        }
 
-// Create a User model based on the schema
-const UserModel = mongoose.model("User",userSchema);
+        const newUser = await prisma.user.create({
+            data: {
+                username: req.body.username,
+                password: req.body.password
+            }
+        });
 
-const PostModel = mongoose.model("Post", postSchema);
+        res.status(201).json({ message: "User created successfully" });
 
-const LinkModel = mongoose.model("Link", LinkSchema);
-
- // @ts-ignore
-app.get("/",verifyToken, (req: Request, res: Response) => {
-    return res.status(200).json({message: "Welcome to the API"});   
+    } catch (error) {
+        console.error("Error creating user:", error);
+    }
 });
 
+app.post("/signin", async (req: Request, res: Response): Promise<any> => {
+    try {
+        const user = await prisma.user.findUnique(
+            { where: { username: req.body.username } }
+        )
+        if (!user) {
+            return res.status(401).json({ message: "Invalid username" });
+        }
 
-app.post("/signup", async (req:Request,res:Response): Promise<any>   => {
- const username= req.body.username;
- const password= req.body.password;
+        const isPasswordValid = user.password === req.body.password;
+        if (!isPasswordValid) {
+            return res.status(401).json({ message: "Invalid password" });
+        }
 
- if (!username || !password){
-    return res.status(400).json({message: "Username and password are required"});
+        const token = jwt.sign({ username: user.username, id: user.id.toString() }, "secret");
+        res.status(200).json({ message: "Login successful", token })
+
+    } catch (error) {
+        res.status(500).json({ message: "Internal server error" });
     }
-
- try{
-    const existingUser = await UserModel.findOne({ username:req.body.username });
-    if(existingUser){
-        return res.status(400).json({message:"User already exists"});
-    }
-
-    const newUser = new UserModel({
-        username: req.body.username,
-        password: req.body.password
-    })
-
-    await newUser.save();
-    res.status(201).json({message: "User created successfully"});
-
- }catch (error) {
-    console.error("Error creating user:", error);   
- }
-});
-
-app.post("/signin", async (req: Request, res: Response): Promise<any>  => {
-try{
-    const user = await UserModel.findOne({ username: req.body.username})
-    if(!user){
-        return res.status(401).json({message: "Invalid username"});
-    }
-
-    const isPasswordValid = user.password === req.body.password;
-    if(!isPasswordValid){   
-        return res.status(401).json({message: "Invalid password"});
-    }
-
-    const token =jwt.sign({username:user.username,  id: user._id.toString()}, "secret");
-    res.status(200).json({message:"Login successful", token})
-
-}catch(error){
-    res.status(500).json({message: "Internal server error"});
-}
 })
 
-app.post("/post", verifyToken ,async (req: Request, res: Response): Promise<any>  => {
-    const {type, link, title, content, tags} = req.body;
+app.post("/post", verifyToken, async (req: Request, res: Response): Promise<any> => {
+    const { type, link, title, content, tags,shareable } = req.body;
 
-    const post = new  PostModel({
-        type,
-        link,
-        title,
-        content,
-        tags
-    })
- 
-    try{
-        await post.save();
-        res.status(201).json({message: "Post created successfully", post});
-    }catch(error){
-        res.status(500).json({message: "Internal server error"});
+    try {
+        const post = await prisma.post.create({
+            data: {
+                title,
+                content,
+            }
+        })
+        res.status(201).json({ message: "Post created successfully", post });
+    } catch (error) {
+        res.status(500).json({ message: "Internal server error" });
     }
 
 })
 
-app.get("/post",verifyToken, async (req: Request, res: Response): Promise<any>  => {
-    
+app.get("/post", verifyToken, async (req: Request, res: Response): Promise<any> => {
+
     // @ts-ignore
     const userId = req.body.user?.id;
     //const userId = req.userId;
-    const content =await PostModel.find({
-        userId: userId
+    const content = await prisma.post.findMany({
+        where: {
+            id: userId, // Filter posts by the user's ID
+        },
     })
     res.status(200).json(content);
 })
 
-app.delete("/post",verifyToken, async (req: Request, res: Response): Promise<any>  => {
-    
-     const { contentId } = req.body; // Get contentId from the request body
-    const userId = req.body.user?.id; // Get userId from the verifyTok middleware
+app.delete("/post", verifyToken, async (req: Request, res: Response): Promise<any> => {
+    const { contentId } = req.body; // Get contentId from the request body
 
     if (!contentId) {
         return res.status(400).json({ message: "Content ID is required" });
     }
-        await PostModel.deleteMany({
-        userId: userId
-    })
 
-     res.json({
-        message: "Deleted"
- 
-    })
-})
+    try {
+        // Delete the post with the specified ID
+        await prisma.post.delete({
+            where: { id: contentId },
+        });
 
-
-app.post("/share", verifyToken ,async (req: Request, res: Response): Promise<any>  => {
-    const share=req.body.share;
-
-    if(share){
-        const existingLink=await LinkModel.findOne({
-            userId: (req as any).user?.id,
-        })
-
-        if(existingLink){
         res.json({
-            hash: existingLink.hash,
-            message: "Link already exists"
-        })
-        return;
+            message: "Post deleted successfully",
+        });
+    } catch (error) {
+        console.error("Error deleting post:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+app.post("/share", verifyToken, async (req: Request, res: Response): Promise<any> => {
+    const share = req.body.share;
+
+    if (share) {
+        // Ensure userId is an integer
+        const userId = parseInt((req as any).user?.id, 10);
+        if (isNaN(userId)) {
+            return res.status(400).json({ message: "Invalid user ID" });
         }
 
-        const hash =random(10);
-        await LinkModel.create({
-            userId: (req as any).user?.id,
-            hash: hash
-        })
+        const existingLink = await prisma.link.findFirst({
+            where: { userId: userId },
+        });
+
+        if (existingLink) {
+            res.json({
+                hash: existingLink.hash,
+                message: "Link already exists"
+            })
+            return;
+        }
+
+        const hash = random(10);
+        await prisma.link.create({
+            data: {
+                userId: (req as any).user?.id,
+                hash: hash,
+            },
+        });
         res.json({
             hash: hash,
             message: "Link created successfully"
         })
-    }else{
-        await LinkModel.deleteMany({
-            userId: (req as any).user?.id,
+    } else {
+        await prisma.link.deleteMany({
+            where: { userId: (req as any).user?.id },
         });
 
         res.json({
@@ -223,31 +237,45 @@ app.post("/share", verifyToken ,async (req: Request, res: Response): Promise<any
 
 })
 
-app.get("/:shareLink" ,async (req: Request, res: Response): Promise<any>  => {
+app.get("/:shareLink", async (req: Request, res: Response): Promise<any> => {
 
-const hash = req.params.shareLink;
+    const hash = req.params.shareLink;
 
-const link =await LinkModel.findOne({
-    hash: hash,
-    
-})
-if (!link) {
+    try{
+
+    const link = await prisma.link.findFirst({
+         where: { hash: hash },
+    //      where: {
+    //     userId: link.userId,
+    //     shareable: true, // Only include shareable posts
+    // },
+
+    })
+    if (!link) {
         res.status(411).json({
             message: "Sorry incorrect input"
         })
         return;
     }
 
-    //userId
-    const content =await PostModel.find({
-    userId: link.userId
-    })
+ // Fetch the posts associated with the user
+    // If your Post model has a userId field, use it as shown below:
+    // const userPosts = await prisma.post.findMany({
+    //         where: { userId: link.userId },
+    //     });
+
+    // Otherwise, if you want to fetch posts by id, keep as is or remove if not needed.
+    // const userPosts = await prisma.post.findMany({
+    //         where: { id: link.userId },
+    //     });
+
 
     console.log(link);
 
-     const user = await UserModel.findOne({
-        _id: link.userId
-    })
+    // Fetch the user associated with the link
+        const user = await prisma.user.findUnique({
+            where: { id: link.userId },
+        });
 
     if (!user) {
         res.status(411).json({
@@ -255,17 +283,49 @@ if (!link) {
         })
         return;
     }
+      // Fetch only shareable posts for the user
+        const shareableContent = await prisma.post.findMany({
+            where: {
+                shareable: true, // Only include shareable posts
+                // Add other valid filters here if needed, e.g., id: link.userId
+            },
+        });
 
     res.json({
         username: user.username,
-        content: content
+        content: shareableContent,
     })
-    console.log("Content shared successfully", content);
-
+ } catch (error) {
+        console.error("Error in /:shareLink endpoint:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
 
 })
 
+app.patch("/post/:id/shareable", verifyToken, async (req: Request, res: Response): Promise<any> => {
+    const postId = parseInt(req.params.id, 10);
+    const { shareable } = req.body;
 
+    if (isNaN(postId) || typeof shareable !== "boolean") {
+        return res.status(400).json({ message: "Invalid input" });
+    }
+
+    try {
+        // Update the shareable status of the post
+        const updatedPost = await prisma.post.update({
+            where: { id: postId },
+            data: { shareable: shareable },
+        });
+
+        res.json({
+            message: "Post updated successfully",
+            post: updatedPost,
+        });
+    } catch (error) {
+        console.error("Error updating post:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
 
 app.listen(3000, () => {
     console.log("Server is running on http://localhost:3000");
